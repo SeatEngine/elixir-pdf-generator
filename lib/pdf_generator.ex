@@ -81,8 +81,8 @@ defmodule PdfGenerator do
   # return file name of generated pdf
 
   @doc """
-  Generates a pdf file from given html string. Returns a string containing a
-  temporary file path for that PDF.
+  Generates a pdf file from given html string or url. Returns a string
+  containing a temporary file path for that PDF.
 
   ## Options
 
@@ -111,6 +111,43 @@ defmodule PdfGenerator do
   """
   def generate( html ) do
     generate html, page_size: "A4"
+  end
+
+  def generate("http" <> url, options) do
+    full_url = "http#{url}"
+    wkhtml_path     = PdfGenerator.PathAgent.get.wkhtml_path
+    filebase        = generate_filebase(options[:filename])
+    pdf_file        = filebase <> ".pdf"
+
+    shell_params = [
+      "--page-size", Keyword.get( options, :page_size ) || "A4",
+      Keyword.get( options, :shell_params ) || [] # will be flattened
+    ]
+
+    executable     = wkhtml_path
+    arguments      = List.flatten( [ shell_params, full_url, pdf_file ] )
+    command_prefix = get_command_prefix( options )
+
+    # allow for xvfb-run wkhtmltopdf arg1 arg2
+    # or sudo wkhtmltopdf ...
+    { executable, arguments } = make_command_tuple(command_prefix, executable, arguments)
+
+    %Result{ out: _output, status: status, err: error } = Porcelain.exec(
+      executable, arguments, [in: "", out: :string, err: :string]
+    )
+
+    case status do
+      0 ->
+        case Keyword.get options, :open_password do
+          nil     -> { :ok, pdf_file }
+          user_pw -> encrypt_pdf(
+            pdf_file,
+            user_pw,
+            Keyword.get( options, :edit_password )
+          )
+        end
+      _ -> { :error, error }
+    end
   end
 
   def generate( html, options ) do
